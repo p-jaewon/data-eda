@@ -1,0 +1,1540 @@
+---
+title: "DATA EDA 및 전처리"
+author: "TEAM1"
+format: revealjs
+editor: visual
+---
+
+## 전체적 EDA 과정 및 전처리
+
+<div style="font-size: 31px;">
+
+-   [사용한 데이터: PS_DATA, PAY_DATA]{.smallcaps}
+
+-   [데이터는 모두 23년을 기준으로 사용]{.smallcaps}
+
+-   연령대별 인터넷 서비스 이용 분포 시각화
+
+-   [연령대별 (20대 \~ 60대) 미디어 콘텐츠 선호도, OTT 선호도 시각화]{.smallcaps}
+
+-   [연령대별 (20대 \~ 60대) 카드사, 결제 카테고리, 연간 소득 분포(1인가구 기준), 연간 평균 소비 금액 시각화]{.smallcaps}
+
+## 필요한 라이브러리 및 데이터 load
+
+```{r echo=TRUE}
+library(dplyr) 
+library(ggplot2)
+
+#PS_data load
+PS_data <- read.csv("C:/R/PS data.csv")
+
+#Pay_data load 
+file_paths <- c("C:/R/pay_data1.csv", "C:/R/pay_data2.csv", "C:/R/pay_data3.csv")
+
+# 실제 공통된 열 이름으로 변경
+common_colnames <- c("PANEL_ID", "SMS_REGISTRATION_DATE", "SMS_REGISTRATION_TIME",	
+                     "APPROVAL_PRICE", "APPROVAL_STORE", "APPROVAL_TYPE", "CARD_PAYMENT_TYPE",
+                     "BRANDNAME_N", "CATE_LEVEL3", "COMPANY_NAME", "APPROVAL_METHOD",	
+                     "APPROVAL_UNIT", "APPROVAL_REAL_PRICE", "NUM")
+
+# 각 파일을 읽고 열 이름을 맞춘 후 병합
+Pay_data_list <- lapply(file_paths, function(file) {
+  df <- read.csv(file)
+  # 공통 열 이름으로 변경
+  colnames(df) <- common_colnames
+  return(df)
+})
+
+Pay_data <- do.call(rbind, Pay_data_list)
+
+# 2023으로 시작하는 SMS_REGISTRATION_DATE 값을 가진 행만 추출 -> 23년 결제 내역
+Pay_data <- Pay_data %>% filter(grepl("^2023", SMS_REGISTRATION_DATE))
+```
+
+## 20대 데이터 추출
+
+```{r echo = TRUE}
+# 2023년 기준 20대의 출생년도 범위를 계산
+start_year_20s_2023 <- 2023 - 29  # 20세에서 29세
+end_year_20s_2023 <- 2023 - 20
+
+# 2023년 기준 20대에 해당하는 데이터를 필터링
+PS_20 <- PS_data %>% filter(X0002 >= start_year_20s_2023 & X0002 <= end_year_20s_2023)
+
+# <Pay_data>
+# PS_30와와 패널 ID가 일치하는 행만 Pay_data에서 추출 -> 30대를 선별
+Pay_data_20 <- semi_join(Pay_data, PS_20, by = "PANEL_ID")
+```
+
+## 20대 인터넷 서비스 이용 분포
+
+```{r}
+# 인터넷 서비스 콘텐츠 항목 목록
+internet_service_labels <- c(
+  "OTT 서비스", "SNS", "블로그/카페", "포털 검색", "모바일 메신저", "음악 듣기", "금융 서비스"
+)
+
+# 필요한 칼럼 추출
+internet_service_data <- PS_20[, paste0("G00", 10:16)]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts <- colSums(internet_service_data == 1, na.rm= TRUE)
+
+# 데이터프레임으로 변환
+yes_counts_df <- data.frame(
+  content = internet_service_labels,
+  count = yes_counts
+)
+
+# 상위 5개 항목 선택
+top5_yes_counts_df <- yes_counts_df[order(-yes_counts_df$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_yes_counts_df, aes(x = reorder(content, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "20대 인터넷 서비스 이용 분포(상위 5개)",
+       x = "서비스", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 20대 영화
+
+20대 영화 장르 선호 분포도를 확인 (상위 5개)
+
+```{r}
+# 확인하려는 칼럼의 0-"응답없음" 값을 제거
+PS_20_genre<- subset(PS_20, G0001 !=0 & G0004 != 0 & G0007 != 0)
+
+# 영화 데이터의 장르 데이터 카운트
+genre_counts <- table(PS_20_genre$G0001)
+
+# 영화 데이터의 상위 5개 장르 선택
+top5_genres <- names(sort(genre_counts, decreasing = TRUE))[1:5]
+
+# 영화 데이터의 데이터프레임으로 변환
+top5_genre_counts <- data.frame(
+  genre = as.numeric(top5_genres),
+  count = as.numeric(genre_counts[top5_genres])
+)
+
+# 영화 데이터의 장르 코드를 실제 장르명으로 변환하는 함수
+genre_code_to_name <- function(code) {
+  genres <- c("액션", "코미디", "로맨스", "스릴러", "공포(호러)", 
+              "SF", "판타지", "드라마", "범죄", "다큐멘터리", 
+              "음악/뮤지컬", "역사", "자연과학", "기타")
+  return(genres[code])
+}
+
+# 영화 데이터의 장르 코드를 실제 장르명으로 변환
+top5_genre_counts$genre <- sapply(top5_genre_counts$genre, genre_code_to_name)
+
+# 영화 데이터의 그래프 그리기
+ggplot(top5_genre_counts, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "30대 영화 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 20대 TV
+
+20대 TV 장르 선호 분포도를 확인 (상위 5개)
+
+```{r}
+# TV 데이터의 장르 데이터 카운트
+genre_counts2 <- table(PS_20_genre$G0004)
+
+# TV 데이터의 상위 5개 장르 선택
+top5_genres2 <- names(sort(genre_counts2, decreasing = TRUE))[1:5]
+
+# TV 데이터의 데이터프레임으로 변환
+top5_genre_counts2 <- data.frame(
+  genre = as.numeric(top5_genres2),
+  count = as.numeric(genre_counts2[top5_genres2])
+)
+
+# TV 데이터의 장르 코드를 실제 장르명으로 변환하는 함수
+genre_code_to_name2 <- function(code) {
+  genres <- c("버라이어티/예능", "드라마", "뉴스", "스포츠", 
+              "취미/레저", "음악", "교육", "시사/다큐", "교양/정보", 
+              "홈쇼핑", "성인", "기타")
+  return(genres[code])
+}
+
+# TV 데이터의 장르 코드를 실제 장르명으로 변환
+top5_genre_counts2$genre <- sapply(top5_genre_counts2$genre, genre_code_to_name2)
+
+# TV 데이터의 그래프 그리기
+ggplot(top5_genre_counts2, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  labs(title = "20대 TV 프로그램 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 20대 라디오
+
+20대 라디오 장르 선호 분포도를 확인 (상위 5개)
+
+```{r}
+# 라디오 장르 데이터 카운트
+genre_counts3 <- table(PS_20_genre$G0007)
+
+# 라디오 데이터의 상위 5개 장르 선택
+top5_genres3 <- names(sort(genre_counts3, decreasing = TRUE))[1:5]
+
+# 상위 5개 장르의 카운트 값을 확인합니다
+top5_counts3 <- as.numeric(genre_counts3[top5_genres3])
+
+# 라디오 데이터의 데이터프레임으로 변환
+top5_genre_counts3 <- data.frame(
+  genre = as.numeric(top5_genres3),
+  count = top5_counts3
+)
+
+# 라디오 장르 코드를 실제 장르명으로 변환하는 함수
+genre_code_to_name3 <- function(code) {
+  genres <- c("시사", "가요/POP", "뉴스", "생활정보", "교양", "클래식", 
+              "성인가요", "청취자 사연", "기타")
+  return(genres[code])
+}
+
+# 라디오 장르 코드를 실제 장르명으로 변환
+top5_genre_counts3$genre <- sapply(top5_genre_counts3$genre, genre_code_to_name3)
+
+
+# 라디오 데이터의 그래프 그리기
+ggplot(top5_genre_counts3, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightpink") +
+  labs(title = "20대 라디오 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 20대 미디어 동영상 콘텐츠
+
+20대 미디어 동영상 콘텐츠 선호 분포 확인 (상위 5개)
+
+```{r}
+media_content_labels <- c(
+  "드라마/영화", "음악/댄스", "푸드/먹방/레시피", "뉴스/시사/정치", 
+  "게임", "스포츠경기 중계/다시보기", "예능/코미디", 
+  "연예계 소식/연예인/가십", "여행", "뷰티(메이크업 등)", 
+  "동물", "운동/헬스/요가/홈트", "학습/강의/업무/사용법/배우기", 
+  "일상 및 토크(Vlog)"
+)
+
+# 필요한 칼럼 추출
+media_content_data <- PS_20[, paste0("G00", 29:42)]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts <- colSums(media_content_data == 1, na.rm= TRUE)
+
+# 데이터프레임으로 변환
+yes_counts_df <- data.frame(
+  content = media_content_labels,
+  count = yes_counts
+)
+
+# 상위 5개 항목 선택
+top5_yes_counts_df <- yes_counts_df[order(-yes_counts_df$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_yes_counts_df, aes(x = reorder(content, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "20대 미디어 동영상 콘텐츠 수요 (상위 5개)",
+       x = "콘텐츠", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 20대 OTT 서비스
+
+30대 OTT서비스 선호 분포 확인 (상위 5개)
+
+```{r}
+# 필요한 칼럼 추출
+ott_columns <- c("G0017", "G0018", "G0019", "G0020", "G0021", 
+                 "G0022", "G0023", "G0024", "G0025", "G0026", "G0043")
+
+ott_data <- PS_20[, ott_columns]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts <- colSums(ott_data == 1, na.rm = TRUE)
+
+# OTT 플랫폼 이름 목록
+ott_labels <- c(
+  "넷플릭스(Netflix)", "웨이브(Wavve)", "왓챠(Watcha)", "티빙(TVING)", 
+  "네이버 시리즈(SERIES)", "유튜브 프리미엄", "시즌(Seezn)", 
+  "U+ 모바일 TV", "카카오TV", "디즈니플러스", "쿠팡플레이"
+)
+
+# 데이터프레임으로 변환환
+yes_counts_df <- data.frame(
+  platform = ott_labels,
+  count = yes_counts
+)
+  
+
+# 상위 5개 항목 선택
+top5_ott <- yes_counts_df[order(-yes_counts_df$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_ott, aes(x = reorder(platform, count), y = count)) +
+  geom_bar(stat = "identity", fill = "red") +
+  labs(title = "20대 OTT 플랫폼 이용 분포 (상위 5개)",
+       x = "OTT 플랫폼", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 20대 카드사
+
+20대 주 이용 카드사 분포 확인 (상위 5개)
+
+```{r}
+# COMPANY_NAME 열에서 가장 빈도가 높은 상위 5개 항목 찾기
+top5_company_name <- Pay_data_20 %>%
+  filter(COMPANY_NAME != "NULL") %>%  # "NULL" 값을 제외
+  count(COMPANY_NAME) %>%
+  arrange(desc(n)) %>%
+  head(5)
+
+# 카드사 분포 시각화
+ggplot(top5_company_name, aes(x = reorder(COMPANY_NAME, n), y = n)) +
+  geom_bar(stat = "identity", fill = "gold") +
+  labs(title = "20대 이용 카드사(상위 5개)", x = "카드사", y = "빈도수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 20대 결제 카테고리
+
+20대 결제 카테고리 분포 확인 (상위 5개)
+
+```{r}
+# CATE_LEVEL3 열에서 가장 빈도가 높은 상위 5개 항목 찾기
+top5_cate_level3 <- Pay_data_20 %>%
+  filter(CATE_LEVEL3 != "NULL") %>% 
+  count(CATE_LEVEL3) %>%
+  arrange(desc(n)) %>%
+  head(5)
+
+# 결제 카테고리 분포 시각화
+ggplot(top5_cate_level3, aes(x = reorder(CATE_LEVEL3, n), y = n)) +
+  geom_bar(stat = "identity", fill = "aquamarine") +
+  labs(title = "20대 주요 결제 카테고리(상위 5개) ", x = "결제 카테고리", y = "빈도수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 20대 연간 소득분포(1인 가구 기준)
+
+20대 연간 소득 분포 확인 (1인 가구 기준)
+
+```{r}
+# 가구원수가 1인 행들만 추출
+single_member_20 <- PS_20[PS_20$Y0001 == 1, ]
+
+# 소득 구간 목록
+income_labels <- c("~1천", "1천~3천", "3천~5천", "5천~7천", "7천~1억", "1억~")
+
+# 소득 구간별 카운트 계산
+income_counts <- table(single_member_20$Y0008)
+
+# 데이터프레임으로 변환
+income_counts_df <- data.frame(
+  income = factor(names(income_counts), levels = 1:6, labels = income_labels),
+  count = as.numeric(income_counts)
+)
+
+# 소득 구간 분포 그래프 그리기
+ggplot(income_counts_df, aes(x = income, y = count)) +
+  geom_bar(stat = "identity", fill = "grey") +
+  labs(title = "20대 연간 소득 분포 (1인 가구 기준)",
+       x = "연간 소득 구간", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 30대 데이터 추출
+
+```{r echo=TRUE}
+
+#<Ps_data>
+# 2023년 기준 30대의 출생년도 범위를 계산
+start_year_30s_2023 <- 2023 - 39 # 30세에서 39세 
+end_year_30s_2023 <- 2023 - 30
+
+# 2023년 기준 30대에 해당하는 데이터를 필터링
+PS_30 <- subset(PS_data, X0002 >= start_year_30s_2023 & X0002 <= end_year_30s_2023)
+
+
+# <Pay_data>
+# PS_30와와 패널 ID가 일치하는 행만 Pay_data에서 추출 -> 30대를 선별
+Pay_data_30 <- semi_join(Pay_data, PS_30, by = "PANEL_ID")
+```
+
+## 30대 인터넷 서비스 이용 분포
+
+```{r}
+# 인터넷 서비스 콘텐츠 항목 목록
+internet_service_labels <- c(
+  "OTT 서비스", "SNS", "블로그/카페", "포털 검색", "모바일 메신저", "음악 듣기", "금융 서비스"
+)
+
+# 필요한 칼럼 추출
+internet_service_data <- PS_30[, paste0("G00", 10:16)]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts <- colSums(internet_service_data == 1, na.rm= TRUE)
+
+# 데이터프레임으로 변환
+yes_counts_df <- data.frame(
+  content = internet_service_labels,
+  count = yes_counts
+)
+
+# 상위 5개 항목 선택
+top5_yes_counts_df <- yes_counts_df[order(-yes_counts_df$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_yes_counts_df, aes(x = reorder(content, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "30대 인터넷 서비스 이용 분포(상위 5개)",
+       x = "서비스", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+## 30대 영화
+
+30대 영화 장르 선호 분포도를 확인 (상위 5개)
+
+```{r}
+# 확인하려는 칼럼의 0-"응답없음" 값을 제거
+PS_30_genre<- subset(PS_30, G0001 !=0 & G0004 != 0 & G0007 != 0)
+
+# 영화 데이터의 장르 데이터 카운트
+genre_counts <- table(PS_30_genre$G0001)
+
+# 영화 데이터의 상위 5개 장르 선택
+top5_genres <- names(sort(genre_counts, decreasing = TRUE))[1:5]
+
+# 영화 데이터의 데이터프레임으로 변환
+top5_genre_counts <- data.frame(
+  genre = as.numeric(top5_genres),
+  count = as.numeric(genre_counts[top5_genres])
+)
+
+# 영화 데이터의 장르 코드를 실제 장르명으로 변환하는 함수
+genre_code_to_name <- function(code) {
+  genres <- c("액션", "코미디", "로맨스", "스릴러", "공포(호러)", 
+              "SF", "판타지", "드라마", "범죄", "다큐멘터리", 
+              "음악/뮤지컬", "역사", "자연과학", "기타")
+  return(genres[code])
+}
+
+# 영화 데이터의 장르 코드를 실제 장르명으로 변환
+top5_genre_counts$genre <- sapply(top5_genre_counts$genre, genre_code_to_name)
+
+# 영화 데이터의 그래프 그리기
+ggplot(top5_genre_counts, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "30대 영화 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 30대 TV
+
+30대 TV 장르 선호 분포도를 확인 (상위 5개)
+
+```{r}
+# TV 데이터의 장르 데이터 카운트
+genre_counts2 <- table(PS_30_genre$G0004)
+
+# TV 데이터의 상위 5개 장르 선택
+top5_genres2 <- names(sort(genre_counts2, decreasing = TRUE))[1:5]
+
+# TV 데이터의 데이터프레임으로 변환
+top5_genre_counts2 <- data.frame(
+  genre = as.numeric(top5_genres2),
+  count = as.numeric(genre_counts2[top5_genres2])
+)
+
+# TV 데이터의 장르 코드를 실제 장르명으로 변환하는 함수
+genre_code_to_name2 <- function(code) {
+  genres <- c("버라이어티/예능", "드라마", "뉴스", "스포츠", 
+              "취미/레저", "음악", "교육", "시사/다큐", "교양/정보", 
+              "홈쇼핑", "성인", "기타")
+  return(genres[code])
+}
+
+# TV 데이터의 장르 코드를 실제 장르명으로 변환
+top5_genre_counts2$genre <- sapply(top5_genre_counts2$genre, genre_code_to_name2)
+
+# TV 데이터의 그래프 그리기
+ggplot(top5_genre_counts2, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  labs(title = "30대 TV 프로그램 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 30대 라디오
+
+30대 라디오 장르 선호 분포도를 확인 (상위 5개)
+
+```{r}
+# 라디오 장르 데이터 카운트
+genre_counts3 <- table(PS_30_genre$G0007)
+
+# 라디오 데이터의 상위 5개 장르 선택
+top5_genres3 <- names(sort(genre_counts3, decreasing = TRUE))[1:5]
+
+# 상위 5개 장르의 카운트 값을 확인합니다
+top5_counts3 <- as.numeric(genre_counts3[top5_genres3])
+
+# 라디오 데이터의 데이터프레임으로 변환
+top5_genre_counts3 <- data.frame(
+  genre = as.numeric(top5_genres3),
+  count = top5_counts3
+)
+
+# 라디오 장르 코드를 실제 장르명으로 변환하는 함수
+genre_code_to_name3 <- function(code) {
+  genres <- c("시사", "가요/POP", "뉴스", "생활정보", "교양", "클래식", 
+              "성인가요", "청취자 사연", "기타")
+  return(genres[code])
+}
+
+# 라디오 장르 코드를 실제 장르명으로 변환
+top5_genre_counts3$genre <- sapply(top5_genre_counts3$genre, genre_code_to_name3)
+
+
+# 라디오 데이터의 그래프 그리기
+ggplot(top5_genre_counts3, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightpink") +
+  labs(title = "30대 라디오 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 30대 미디어 동영상 콘텐츠
+
+30대 미디어 동영상 콘텐츠 선호 분포 확인 (상위 5개)
+
+```{r}
+# 미디어 동영상 콘텐츠 항목 목록
+media_content_labels <- c(
+  "드라마/영화", "음악/댄스", "푸드/먹방/레시피", "뉴스/시사/정치", 
+  "게임", "스포츠경기 중계/다시보기", "예능/코미디", 
+  "연예계 소식/연예인/가십", "여행", "뷰티(메이크업 등)", 
+  "동물", "운동/헬스/요가/홈트", "학습/강의/업무/사용법/배우기", 
+  "일상 및 토크(Vlog)"
+)
+
+# 필요한 칼럼 추출
+media_content_data <- PS_30[, paste0("G00", 29:42)]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts <- colSums(media_content_data == 1, na.rm= TRUE)
+
+# 데이터프레임으로 변환
+yes_counts_df <- data.frame(
+  content = media_content_labels,
+  count = yes_counts
+)
+
+# 상위 5개 항목 선택
+top5_yes_counts_df <- yes_counts_df[order(-yes_counts_df$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_yes_counts_df, aes(x = reorder(content, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "30대 미디어 동영상 콘텐츠 수요 (상위 5개)",
+       x = "콘텐츠", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 30대 OTT 서비스
+
+30대 OTT서비스 선호 분포 확인 (상위 5개)
+
+```{r}
+# 필요한 칼럼 추출
+ott_columns <- c("G0017", "G0018", "G0019", "G0020", "G0021", 
+                 "G0022", "G0023", "G0024", "G0025", "G0026", "G0043")
+
+ott_data <- PS_30[, ott_columns]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts <- colSums(ott_data == 1, na.rm = TRUE)
+
+# OTT 플랫폼 이름 목록
+ott_labels <- c(
+  "넷플릭스(Netflix)", "웨이브(Wavve)", "왓챠(Watcha)", "티빙(TVING)", 
+  "네이버 시리즈(SERIES)", "유튜브 프리미엄", "시즌(Seezn)", 
+  "U+ 모바일 TV", "카카오TV", "디즈니플러스", "쿠팡플레이"
+)
+
+# 데이터프레임으로 변환환
+yes_counts_df <- data.frame(
+  platform = ott_labels,
+  count = yes_counts
+)
+  
+
+# 상위 5개 항목 선택
+top5_ott <- yes_counts_df[order(-yes_counts_df$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_ott, aes(x = reorder(platform, count), y = count)) +
+  geom_bar(stat = "identity", fill = "red") +
+  labs(title = "30대 OTT 플랫폼 이용 분포 (상위 5개)",
+       x = "OTT 플랫폼", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 30대 카드사
+
+30대 주 이용 카드사 분포 확인 (상위 5개)
+
+```{r}
+# COMPANY_NAME 열에서 가장 빈도가 높은 상위 5개 항목 찾기
+top5_company_name <- Pay_data_30 %>%
+  filter(COMPANY_NAME != "NULL") %>%  # "NULL" 값을 제외
+  count(COMPANY_NAME) %>%
+  arrange(desc(n)) %>%
+  head(5)
+
+# 카드사 분포 시각화
+ggplot(top5_company_name, aes(x = reorder(COMPANY_NAME, n), y = n)) +
+  geom_bar(stat = "identity", fill = "gold") +
+  labs(title = "30대 이용 카드사(상위 5개)", x = "카드사", y = "빈도수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 30대 결제 카테고리
+
+30대 결제 카테고리 분포 확인 (상위 5개)
+
+```{r}
+# CATE_LEVEL3 열에서 가장 빈도가 높은 상위 5개 항목 찾기
+top5_cate_level3 <- Pay_data_30 %>%
+  filter(CATE_LEVEL3 != "NULL") %>% 
+  count(CATE_LEVEL3) %>%
+  arrange(desc(n)) %>%
+  head(5)
+
+# 결제 카테고리 분포 시각화
+ggplot(top5_cate_level3, aes(x = reorder(CATE_LEVEL3, n), y = n)) +
+  geom_bar(stat = "identity", fill = "aquamarine") +
+  labs(title = "30대 주요 결제 카테고리(상위 5개) ", x = "결제 카테고리", y = "빈도수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 30대 연간 소득분포(1인 가구 기준)
+
+30대 연간 소득 분포 확인 (1인 가구 기준)
+
+```{r}
+# 가구원수가 1인 행들만 추출
+single_member_30 <- PS_30[PS_30$Y0001 == 1, ]
+
+# 소득 구간 목록
+income_labels <- c("~1천", "1천~3천", "3천~5천", "5천~7천", "7천~1억", "1억~")
+
+# 소득 구간별 카운트 계산
+income_counts <- table(single_member_30$Y0008)
+
+# 데이터프레임으로 변환
+income_counts_df <- data.frame(
+  income = factor(names(income_counts), levels = 1:6, labels = income_labels),
+  count = as.numeric(income_counts)
+)
+
+# 소득 구간 분포 그래프 그리기
+ggplot(income_counts_df, aes(x = income, y = count)) +
+  geom_bar(stat = "identity", fill = "grey") +
+  labs(title = "30대 연간 소득 분포 (1인 가구 기준)",
+       x = "연간 소득 구간", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 40대 데이터 추출
+
+```{r echo=TRUE}
+# 2023년 기준 40대의 출생년도 범위를 계산
+start_year_40s_2023 <- 2023 - 49 # 40세에서 49세
+end_year_40s_2023 <- 2023 - 40
+
+# 2023년 기준 40대에 해당하는 데이터를 필터링
+PS_40 <- subset(PS_data, X0002 >= start_year_40s_2023 & X0002 <= end_year_40s_2023)
+
+# PS_40와 패널 ID가 일치하는 행만 Pay_data에서 추출 -> 40대를 선별
+Pay_data_40 <- semi_join(Pay_data, PS_40, by = "PANEL_ID")
+```
+
+## 40대 인터넷 서비스 이용 분포
+
+```{r}
+# 인터넷 서비스 콘텐츠 항목 목록
+internet_service_labels <- c(
+  "OTT 서비스", "SNS", "블로그/카페", "포털 검색", "모바일 메신저", "음악 듣기", "금융 서비스"
+)
+
+# 필요한 칼럼 추출
+internet_service_data <- PS_40[, paste0("G00", 10:16)]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts <- colSums(internet_service_data == 1, na.rm= TRUE)
+
+# 데이터프레임으로 변환
+yes_counts_df <- data.frame(
+  content = internet_service_labels,
+  count = yes_counts
+)
+
+# 상위 5개 항목 선택
+top5_yes_counts_df <- yes_counts_df[order(-yes_counts_df$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_yes_counts_df, aes(x = reorder(content, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "40대 인터넷 서비스 이용 분포(상위 5개)",
+       x = "서비스", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 40대 영화
+
+40대 영화 장르 선호 분포도 확인 (상위5개)
+
+```{r}
+# 확인하려는 칼럼의 0-"응답없음" 값을 제거
+PS_40_genre <- subset(PS_40, G0001 != 0 & G0004 != 0 & G0007 != 0)
+
+# 영화 데이터의 장르 데이터 카운트
+genre_counts_40 <- table(PS_40_genre$G0001)
+
+# 영화 데이터의 상위 5개 장르 선택
+top5_genres_40 <- names(sort(genre_counts_40, decreasing = TRUE))[1:5]
+
+# 영화 데이터의 데이터프레임으로 변환
+top5_genre_counts_40 <- data.frame(
+  genre = as.numeric(top5_genres_40),
+  count = as.numeric(genre_counts_40[top5_genres_40])
+)
+
+# 영화 데이터의 장르 코드를 실제 장르명으로 변환
+top5_genre_counts_40$genre <- sapply(top5_genre_counts_40$genre, genre_code_to_name)
+
+# 영화 데이터의 그래프 그리기
+ggplot(top5_genre_counts_40, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "40대 영화 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 40대 TV
+
+40대 TV 장르 선호 분포도 확인 (상위 5개)
+
+```{r}
+# TV 데이터의 장르 데이터 카운트
+genre_counts2_40 <- table(PS_40_genre$G0004)
+
+# TV 데이터의 상위 5개 장르 선택
+top5_genres2_40 <- names(sort(genre_counts2_40, decreasing = TRUE))[1:5]
+
+# TV 데이터의 데이터프레임으로 변환
+top5_genre_counts2_40 <- data.frame(
+  genre = as.numeric(top5_genres2_40),
+  count = as.numeric(genre_counts2_40[top5_genres2_40])
+)
+
+# TV 데이터의 장르 코드를 실제 장르명으로 변환
+top5_genre_counts2_40$genre <- sapply(top5_genre_counts2_40$genre, genre_code_to_name2)
+
+# TV 데이터의 그래프 그리기
+ggplot(top5_genre_counts2_40, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  labs(title = "40대 TV 프로그램 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 40대 라디오
+
+40대 라디오 장르 선호 분포도 확인 (상위 5개)
+
+```{r}
+# 라디오 장르 데이터 카운트
+genre_counts3_40 <- table(PS_40_genre$G0007)
+
+# 라디오 데이터의 상위 5개 장르 선택
+top5_genres3_40 <- names(sort(genre_counts3_40, decreasing = TRUE))[1:5]
+
+# 라디오 데이터의 데이터프레임으로 변환
+top5_genre_counts3_40 <- data.frame(
+  genre = as.numeric(top5_genres3_40),
+  count = as.numeric(genre_counts3_40[top5_genres3_40])
+)
+
+# 라디오 장르 코드를 실제 장르명으로 변환
+top5_genre_counts3_40$genre <- sapply(top5_genre_counts3_40$genre, genre_code_to_name3)
+
+# 라디오 데이터의 그래프 그리기
+ggplot(top5_genre_counts3_40, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightpink") +
+  labs(title = "40대 라디오 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 40대 미디어 동영상 콘텐츠
+
+40대 미디어 동영상 콘텐츠 선호 분포 확인 (상위 5개)
+
+```{r}
+# 필요한 칼럼 추출
+media_content_data_40 <- PS_40[, paste0("G00", 29:42)]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts_40 <- colSums(media_content_data_40 == 1, na.rm= TRUE)
+
+# 데이터프레임으로 변환
+yes_counts_df_40 <- data.frame(
+  content = media_content_labels,
+  count = yes_counts_40
+)
+
+# 상위 5개 항목 선택
+top5_yes_counts_df_40 <- yes_counts_df_40[order(-yes_counts_df_40$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_yes_counts_df_40, aes(x = reorder(content, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "40대 미디어 동영상 콘텐츠 수요 (상위 5개)",
+       x = "콘텐츠", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 40대 OTT 서비스
+
+40대 OTT 서비스 선호 분포 확인 (상위 5개)
+
+```{r}
+# 필요한 칼럼 추출
+ott_data_40 <- PS_40[, ott_columns]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts_40 <- colSums(ott_data_40 == 1, na.rm = TRUE)
+
+# 데이터프레임으로 변환
+yes_counts_df_40 <- data.frame(
+  platform = ott_labels,
+  count = yes_counts_40
+)
+
+# 상위 5개 항목 선택
+top5_ott_40 <- yes_counts_df_40[order(-yes_counts_df_40$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_ott_40, aes(x = reorder(platform, count), y = count)) +
+  geom_bar(stat = "identity", fill = "red") +
+  labs(title = "40대 OTT 플랫폼 이용 분포 (상위 5개)",
+       x = "OTT 플랫폼", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 40대 카드사
+
+40대 주 이용 카드사 분포 확인 (상위 5개)
+
+```{r}
+# COMPANY_NAME 열에서 가장 빈도가 높은 상위 5개 항목 찾기
+top5_company_name_40 <- Pay_data_40 %>%
+  filter(COMPANY_NAME != "NULL") %>%  # "NULL" 값을 제외
+  count(COMPANY_NAME) %>%
+  arrange(desc(n)) %>%
+  head(5)
+
+# 카드사 분포 시각화
+ggplot(top5_company_name_40, aes(x = reorder(COMPANY_NAME, n), y = n)) +
+  geom_bar(stat = "identity", fill = "gold") +
+  labs(title = "40대 이용 카드사(상위 5개)", x = "카드사", y = "빈도수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 40대 결제 카테고리
+
+40대 결제 카테고리 분포 확인 (상위 5개)
+
+```{r}
+# CATE_LEVEL3 열에서 가장 빈도가 높은 상위 5개 항목 찾기
+top5_cate_level3_40 <- Pay_data_40 %>%
+  filter(CATE_LEVEL3 != "NULL") %>% 
+  count(CATE_LEVEL3) %>%
+  arrange(desc(n)) %>%
+  head(5)
+
+# 결제 카테고리 분포 시각화
+ggplot(top5_cate_level3_40, aes(x = reorder(CATE_LEVEL3, n), y = n)) +
+  geom_bar(stat = "identity", fill = "aquamarine") +
+  labs(title = "40대 주요 결제 카테고리(상위 5개) ", x = "결제 카테고리", y = "빈도수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 40대 연간 소득분포
+
+40대 연간 소득 분포 확인 (1인 가구 기준)
+
+```{r}
+# 가구원수가 1인 행들만 추출
+single_member_40 <- PS_40[PS_40$Y0001 == 1, ]
+
+# 소득 구간별 카운트 계산
+income_counts_40 <- table(single_member_40$Y0008)
+
+# 데이터프레임으로 변환
+income_counts_df_40 <- data.frame(
+  income = factor(names(income_counts_40), levels = 1:6, labels = income_labels),
+  count = as.numeric(income_counts_40)
+)
+
+# 소득 구간 분포 그래프 그리기
+ggplot(income_counts_df_40, aes(x = income, y = count)) +
+  geom_bar(stat = "identity", fill = "grey") +
+  labs(title = "40대 연간 소득 분포 (1인 가구 기준)",
+       x = "연간 소득 구간", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 50대 데이터 추출
+
+```{r echo=TRUE}
+# 2023년 기준 50대의 출생년도 범위를 계산
+start_year_50s_2023 <- 2023 - 59 # 50세에서 59세
+end_year_50s_2023 <- 2023 - 50
+
+# 2023년 기준 50대에 해당하는 데이터를 필터링
+PS_50 <- subset(PS_data, X0002 >= start_year_50s_2023 & X0002 <= end_year_50s_2023)
+
+# PS_50와 패널 ID가 일치하는 행만 Pay_data에서 추출 -> 50대를 선별
+Pay_data_50 <- semi_join(Pay_data, PS_50, by = "PANEL_ID")
+```
+
+## 50대 인터넷 서비스 이용 분포
+
+```{r}
+# 인터넷 서비스 콘텐츠 항목 목록
+internet_service_labels <- c(
+  "OTT 서비스", "SNS", "블로그/카페", "포털 검색", "모바일 메신저", "음악 듣기", "금융 서비스"
+)
+
+# 필요한 칼럼 추출
+internet_service_data <- PS_50[, paste0("G00", 10:16)]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts <- colSums(internet_service_data == 1, na.rm= TRUE)
+
+# 데이터프레임으로 변환
+yes_counts_df <- data.frame(
+  content = internet_service_labels,
+  count = yes_counts
+)
+
+# 상위 5개 항목 선택
+top5_yes_counts_df <- yes_counts_df[order(-yes_counts_df$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_yes_counts_df, aes(x = reorder(content, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "50대 인터넷 서비스 이용 분포(상위 5개)",
+       x = "서비스", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 50대 영화
+
+50대 영화 장르 선호 분포도 확인 (상위 5개)
+
+```{r}
+# 확인하려는 칼럼의 0-"응답없음" 값을 제거
+PS_50_genre <- subset(PS_50, G0001 != 0 & G0004 != 0 & G0007 != 0)
+
+# 영화 데이터의 장르 데이터 카운트
+genre_counts_50 <- table(PS_50_genre$G0001)
+
+# 영화 데이터의 상위 5개 장르 선택
+top5_genres_50 <- names(sort(genre_counts_50, decreasing = TRUE))[1:5]
+
+# 영화 데이터의 데이터프레임으로 변환
+top5_genre_counts_50 <- data.frame(
+  genre = as.numeric(top5_genres_50),
+  count = as.numeric(genre_counts_50[top5_genres_50])
+)
+
+# 영화 데이터의 장르 코드를 실제 장르명으로 변환
+top5_genre_counts_50$genre <- sapply(top5_genre_counts_50$genre, genre_code_to_name)
+
+# 영화 데이터의 그래프 그리기
+ggplot(top5_genre_counts_50, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "50대 영화 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 50대 TV
+
+50대 TV 장르 선호 분포도 확인 (상위 5개)
+
+```{r}
+# TV 데이터의 장르 데이터 카운트
+genre_counts2_50 <- table(PS_50_genre$G0004)
+
+# TV 데이터의 상위 5개 장르 선택
+top5_genres2_50 <- names(sort(genre_counts2_50, decreasing = TRUE))[1:5]
+
+# TV 데이터의 데이터프레임으로 변환
+top5_genre_counts2_50 <- data.frame(
+  genre = as.numeric(top5_genres2_50),
+  count = as.numeric(genre_counts2_50[top5_genres2_50])
+)
+
+# TV 데이터의 장르 코드를 실제 장르명으로 변환
+top5_genre_counts2_50$genre <- sapply(top5_genre_counts2_50$genre, genre_code_to_name2)
+
+# TV 데이터의 그래프 그리기
+ggplot(top5_genre_counts2_50, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  labs(title = "50대 TV 프로그램 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 50대 라디오
+
+50대 라디오 장르 선호 분포도 확인 (상위 5개)
+
+```{r}
+# 라디오 장르 데이터 카운트
+genre_counts3_50 <- table(PS_50_genre$G0007)
+
+# 라디오 데이터의 상위 5개 장르 선택
+top5_genres3_50 <- names(sort(genre_counts3_50, decreasing = TRUE))[1:5]
+
+# 라디오 데이터의 데이터프레임으로 변환
+top5_genre_counts3_50 <- data.frame(
+  genre = as.numeric(top5_genres3_50),
+  count = as.numeric(genre_counts3_50[top5_genres3_50])
+)
+
+# 라디오 장르 코드를 실제 장르명으로 변환
+top5_genre_counts3_50$genre <- sapply(top5_genre_counts3_50$genre, genre_code_to_name3)
+
+# 라디오 데이터의 그래프 그리기
+ggplot(top5_genre_counts3_50, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightpink") +
+  labs(title = "50대 라디오 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 50대 미디어 동영상 콘텐츠
+
+50대 미디어 동영상 콘텐츠 선호 분포 확인 (상위 5개)
+
+```{r}
+# 필요한 칼럼 추출
+media_content_data_50 <- PS_50[, paste0("G00", 29:42)]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts_50 <- colSums(media_content_data_50 == 1, na.rm= TRUE)
+
+# 데이터프레임으로 변환
+yes_counts_df_50 <- data.frame(
+  content = media_content_labels,
+  count = yes_counts_50
+)
+
+# 상위 5개 항목 선택
+top5_yes_counts_df_50 <- yes_counts_df_50[order(-yes_counts_df_50$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_yes_counts_df_50, aes(x = reorder(content, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "50대 미디어 동영상 콘텐츠 수요 (상위 5개)",
+       x = "콘텐츠", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 50대 OTT 서비스
+
+50대 OTT 서비스 선호 분포 확인 (상위 5개)
+
+```{r}
+# 필요한 칼럼 추출
+ott_data_50 <- PS_50[, ott_columns]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts_50 <- colSums(ott_data_50 == 1, na.rm = TRUE)
+
+# 데이터프레임으로 변환
+yes_counts_df_50 <- data.frame(
+  platform = ott_labels,
+  count = yes_counts_50
+)
+
+# 상위 5개 항목 선택
+top5_ott_50 <- yes_counts_df_50[order(-yes_counts_df_50$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_ott_50, aes(x = reorder(platform, count), y = count)) +
+  geom_bar(stat = "identity", fill = "red") +
+  labs(title = "50대 OTT 플랫폼 이용 분포 (상위 5개)",
+       x = "OTT 플랫폼", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 50대 카드사
+
+50대 주 이용 카드사 분포 확인 (상위 5개)
+
+```{r}
+# COMPANY_NAME 열에서 가장 빈도가 높은 상위 5개 항목 찾기
+top5_company_name_50 <- Pay_data_50 %>%
+  filter(COMPANY_NAME != "NULL") %>%  # "NULL" 값을 제외
+  count(COMPANY_NAME) %>%
+  arrange(desc(n)) %>%
+  head(5)
+
+# 카드사 분포 시각화
+ggplot(top5_company_name_50, aes(x = reorder(COMPANY_NAME, n), y = n)) +
+  geom_bar(stat = "identity", fill = "gold") +
+  labs(title = "50대 이용 카드사(상위 5개)", x = "카드사", y = "빈도수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 50대 결제 카테고리
+
+50대 결제 카테고리 분포 확인 (상위 5개)
+
+```{r}
+# CATE_LEVEL3 열에서 가장 빈도가 높은 상위 5개 항목 찾기
+top5_cate_level3_50 <- Pay_data_50 %>%
+  filter(CATE_LEVEL3 != "NULL") %>% 
+  count(CATE_LEVEL3) %>%
+  arrange(desc(n)) %>%
+  head(5)
+
+# 결제 카테고리 분포 시각화
+ggplot(top5_cate_level3_50, aes(x = reorder(CATE_LEVEL3, n), y = n)) +
+  geom_bar(stat = "identity", fill = "aquamarine") +
+  labs(title = "50대 주요 결제 카테고리(상위 5개) ", x = "결제 카테고리", y = "빈도수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 50대 연간 소득분포
+
+50대 연간 소득 분포 확인 (1인 가구 기준)
+
+```{r}
+# 가구원수가 1인 행들만 추출
+single_member_50 <- PS_50[PS_50$Y0001 == 1, ]
+
+# 소득 구간별 카운트 계산
+income_counts_50 <- table(single_member_50$Y0008)
+
+# 데이터프레임으로 변환
+income_counts_df_50 <- data.frame(
+  income = factor(names(income_counts_50), levels = 1:6, labels = income_labels),
+  count = as.numeric(income_counts_50)
+)
+
+# 소득 구간 분포 그래프 그리기
+ggplot(income_counts_df_50, aes(x = income, y = count)) +
+  geom_bar(stat = "identity", fill = "grey") +
+  labs(title = "50대 연간 소득 분포 (1인 가구 기준)",
+       x = "연간 소득 구간", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 60대 데이터 추출
+
+```{r echo = TRUE}
+# 2023년 기준 60대의 출생년도 범위를 계산
+start_year_60s_2023 <- 2023 - 69 # 60세에서 69세 
+end_year_60s_2023 <- 2023 - 60
+
+# 2023년 기준 60대에 해당하는 데이터를 필터링
+PS_60 <- subset(PS_data, X0002 >= start_year_60s_2023 & X0002 <= end_year_60s_2023)
+
+
+# PS_60와 패널 ID가 일치하는 행만 Pay_data에서 추출 -> 60대를 선별
+Pay_data_60 <- semi_join(Pay_data, PS_60, by = "PANEL_ID")
+```
+
+## 60대 인터넷 서비스 이용 분포
+
+```{r}
+# 인터넷 서비스 콘텐츠 항목 목록
+internet_service_labels <- c(
+  "OTT 서비스", "SNS", "블로그/카페", "포털 검색", "모바일 메신저", "음악 듣기", "금융 서비스"
+)
+
+# 필요한 칼럼 추출
+internet_service_data <- PS_60[, paste0("G00", 10:16)]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts <- colSums(internet_service_data == 1, na.rm= TRUE)
+
+# 데이터프레임으로 변환
+yes_counts_df <- data.frame(
+  content = internet_service_labels,
+  count = yes_counts
+)
+
+# 상위 5개 항목 선택
+top5_yes_counts_df <- yes_counts_df[order(-yes_counts_df$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_yes_counts_df, aes(x = reorder(content, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "60대 인터넷 서비스 이용 분포(상위 5개)",
+       x = "서비스", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 60대 영화
+
+60대 영화 장르 선호 분포도를 확인 (상위 5개)
+
+```{r}
+# 응답 없음을 제외한 영화 장르 필터링
+PS_60_genre <- subset(PS_60, G0001 != 0 & G0004 != 0 & G0007 != 0)
+
+# 영화 장르 카운트
+genre_counts <- table(PS_60_genre$G0001)
+
+# 상위 5개 장르 선택
+top5_genres <- names(sort(genre_counts, decreasing = TRUE))[1:5]
+
+# 데이터프레임으로 변환
+top5_genre_counts <- data.frame(
+  genre = as.numeric(top5_genres),
+  count = as.numeric(genre_counts[top5_genres])
+)
+
+# 장르 코드를 실제 장르명으로 변환
+top5_genre_counts$genre <- sapply(top5_genre_counts$genre, genre_code_to_name)
+
+# 그래프 그리기
+ggplot(top5_genre_counts, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "60대 영화 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 60대 TV
+
+60대 TV 장르 선호 분포도 확인 (상위 5개)
+
+```{r}
+# TV 장르 카운트
+genre_counts2 <- table(PS_60_genre$G0004)
+
+# 상위 5개 장르 선택
+top5_genres2 <- names(sort(genre_counts2, decreasing = TRUE))[1:5]
+
+# 데이터프레임으로 변환
+top5_genre_counts2 <- data.frame(
+  genre = as.numeric(top5_genres2),
+  count = as.numeric(genre_counts2[top5_genres2])
+)
+
+# 장르 코드를 실제 장르명으로 변환
+top5_genre_counts2$genre <- sapply(top5_genre_counts2$genre, genre_code_to_name2)
+
+# 그래프 그리기
+ggplot(top5_genre_counts2, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightgreen") +
+  labs(title = "60대 TV 프로그램 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 60대 라디오
+
+60대 라디오 장르 선호 분포도 확인 (상위 5개)
+
+```{r}
+# 라디오 장르 데이터 카운트
+genre_counts3 <- table(PS_60_genre$G0007)
+
+# 라디오 데이터의 상위 5개 장르 선택
+top5_genres3 <- names(sort(genre_counts3, decreasing = TRUE))[1:5]
+
+# 상위 5개 장르의 카운트 값을 확인합니다
+top5_counts3 <- as.numeric(genre_counts3[top5_genres3])
+
+# 라디오 데이터의 데이터프레임으로 변환
+top5_genre_counts3 <- data.frame(
+  genre = as.numeric(top5_genres3),
+  count = top5_counts3
+)
+
+# 라디오 장르 코드를 실제 장르명으로 변환하는 함수
+genre_code_to_name3 <- function(code) {
+  genres <- c("시사", "가요/POP", "뉴스", "생활정보", "교양", "클래식", 
+              "성인가요", "청취자 사연", "기타")
+  return(genres[code])
+}
+
+# 라디오 장르 코드를 실제 장르명으로 변환
+top5_genre_counts3$genre <- sapply(top5_genre_counts3$genre, genre_code_to_name3)
+
+# 라디오 데이터의 그래프 그리기
+ggplot(top5_genre_counts3, aes(x = reorder(genre, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightpink") +
+  labs(title = "60대 라디오 장르 선호도 분포 (상위 5개)",
+       x = "장르", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 60대 미디어 동영상 콘텐츠
+
+60대 미디어 동영상 콘텐츠 선호 분포 확인 (상위 5개)
+
+```{r}
+# 미디어 동영상 콘텐츠 항목 목록
+media_content_labels <- c(
+  "드라마/영화", "음악/댄스", "푸드/먹방/레시피", "뉴스/시사/정치", 
+  "게임", "스포츠경기 중계/다시보기", "예능/코미디", 
+  "연예계 소식/연예인/가십", "여행", "뷰티(메이크업 등)", 
+  "동물", "운동/헬스/요가/홈트", "학습/강의/업무/사용법/배우기", 
+  "일상 및 토크(Vlog)"
+)
+
+# 필요한 칼럼 추출
+media_content_data <- PS_60[, paste0("G00", 29:42)]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts <- colSums(media_content_data == 1, na.rm= TRUE)
+
+# 데이터프레임으로 변환
+yes_counts_df <- data.frame(
+  content = media_content_labels,
+  count = yes_counts
+)
+
+# 상위 5개 항목 선택
+top5_yes_counts_df <- yes_counts_df[order(-yes_counts_df$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_yes_counts_df, aes(x = reorder(content, count), y = count)) +
+  geom_bar(stat = "identity", fill = "lightblue") +
+  labs(title = "60대 미디어 동영상 콘텐츠 수요 (상위 5개)",
+       x = "콘텐츠", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 60대 OTT 서비스
+
+60대 OTT 서비스 선호 분포 확인 (상위 5개)
+
+```{r}
+# 필요한 칼럼 추출
+ott_columns <- c("G0017", "G0018", "G0019", "G0020", "G0021", 
+                 "G0022", "G0023", "G0024", "G0025", "G0026", "G0043")
+
+ott_data <- PS_60[, ott_columns]
+
+# 각 칼럼에서 1의 개수 세기
+yes_counts <- colSums(ott_data == 1, na.rm = TRUE)
+
+# OTT 플랫폼 이름 목록
+ott_labels <- c(
+  "넷플릭스(Netflix)", "웨이브(Wavve)", "왓챠(Watcha)", "티빙(TVING)", 
+  "네이버 시리즈(SERIES)", "유튜브 프리미엄", "시즌(Seezn)", 
+  "U+ 모바일 TV", "카카오TV", "디즈니플러스", "쿠팡플레이"
+)
+
+# 데이터프레임으로 변환환
+yes_counts_df <- data.frame(
+  platform = ott_labels,
+  count = yes_counts
+)
+
+# 상위 5개 항목 선택
+top5_ott <- yes_counts_df[order(-yes_counts_df$count), ][1:5, ]
+
+# 그래프 그리기
+ggplot(top5_ott, aes(x = reorder(platform, count), y = count)) +
+  geom_bar(stat = "identity", fill = "red") +
+  labs(title = "60대 OTT 플랫폼 이용 분포 (상위 5개)",
+       x = "OTT 플랫폼", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 60대 카드사
+
+60대 주 이용 카드사 분포 확인 (상위 5개)
+
+```{r}
+# COMPANY_NAME 열에서 가장 빈도가 높은 상위 5개 항목 찾기
+top5_company_name <- Pay_data_60 %>%
+  filter(COMPANY_NAME != "NULL") %>%  # "NULL" 값을 제외
+  count(COMPANY_NAME) %>%
+  arrange(desc(n)) %>%
+  head(5)
+
+# 카드사 분포 시각화
+ggplot(top5_company_name, aes(x = reorder(COMPANY_NAME, n), y = n)) +
+  geom_bar(stat = "identity", fill = "gold") +
+  labs(title = "60대 이용 카드사(상위 5개)", x = "카드사", y = "빈도수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 60대 결제 카테고리
+
+60대 결제 카테고리 분포 확인 (상위 5개)
+
+```{r}
+# CATE_LEVEL3 열에서 가장 빈도가 높은 상위 5개 항목 찾기
+top5_cate_level3 <- Pay_data_60 %>%
+  filter(CATE_LEVEL3 != "NULL") %>% 
+  count(CATE_LEVEL3) %>%
+  arrange(desc(n)) %>%
+  head(5)
+
+# 결제 카테고리 분포 시각화
+ggplot(top5_cate_level3, aes(x = reorder(CATE_LEVEL3, n), y = n)) +
+  geom_bar(stat = "identity", fill = "aquamarine") +
+  labs(title = "60대 주요 결제 카테고리(상위 5개) ", x = "결제 카테고리", y = "빈도수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 60대 연간 소득분포(1인 가구 기준)
+
+60대 결제 카테고리 분포 확인 (상위 5개)
+
+```{r}
+# 가구원수가 1인 행들만 추출
+single_member_60 <- PS_60[PS_60$Y0001 == 1, ]
+
+# 소득 구간 목록
+income_labels <- c("~1천", "1천~3천", "3천~5천", "5천~7천", "7천~1억", "1억~")
+
+# 소득 구간별 카운트 계산
+income_counts <- table(single_member_60$Y0008)
+
+# 데이터프레임으로 변환
+income_counts_df <- data.frame(
+  income = factor(names(income_counts), levels = 1:6, labels = income_labels),
+  count = as.numeric(income_counts)
+)
+
+# 소득 구간 분포 그래프 그리기
+ggplot(income_counts_df, aes(x = income, y = count)) +
+  geom_bar(stat = "identity", fill = "grey") +
+  labs(title = "60대 연간 소득 분포 (1인 가구 기준)",
+       x = "연간 소득 구간", y = "응답 수") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 23년 기준 연평균 연령대별 소비금액
+
+\<상/하위 값 10% 제거\>
+
+```{r}
+# IQR 계산
+Q1 <- quantile(Pay_data$APPROVAL_REAL_PRICE, 0.10, na.rm = TRUE)
+Q3 <- quantile(Pay_data$APPROVAL_REAL_PRICE, 0.90, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+# IQR 범위를 벗어난 이상치 제거
+Pay_data_filtered <- Pay_data %>%
+  filter(APPROVAL_REAL_PRICE >= (Q1 - 1.5 * IQR) & APPROVAL_REAL_PRICE <= (Q3 + 1.5 * IQR))
+
+# 패널별 실제 결제 금액 평균 계산
+panel_avg_price <- Pay_data_filtered %>%
+  group_by(PANEL_ID) %>%
+  summarise(average_real_price = mean(APPROVAL_REAL_PRICE, na.rm = TRUE), .groups = 'drop')
+
+# PS 데이터에서 필요한 컬럼만 선택 및 변수명 변경
+PS_clean <- PS_data %>%
+  select(PANEL_ID, BIRTH_YEAR = X0002)
+
+# 패널별 평균 결제 금액 데이터와 PS 데이터 병합
+merged_avg_data <- panel_avg_price %>%
+  inner_join(PS_clean, by = "PANEL_ID") %>%
+  select(PANEL_ID, BIRTH_YEAR, average_real_price)
+
+# 연령대 생성 (2023년 기준)
+merged_avg_data <- merged_avg_data %>%
+  mutate(AGE_GROUP = case_when(
+    BIRTH_YEAR >= 1994 & BIRTH_YEAR <= 2003 ~ "20대",
+    BIRTH_YEAR >= 1984 & BIRTH_YEAR <= 1993 ~ "30대",
+    BIRTH_YEAR >= 1974 & BIRTH_YEAR <= 1983 ~ "40대",
+    BIRTH_YEAR >= 1964 & BIRTH_YEAR <= 1973 ~ "50대",
+    BIRTH_YEAR >= 1954 & BIRTH_YEAR <= 1963 ~ "60대",
+  )) %>% filter(!is.na(AGE_GROUP))  # NA 값 제거
+
+# 연령대별 실제 결제 금액 평균 계산
+age_group_avg_price <- merged_avg_data %>%
+  group_by(AGE_GROUP) %>%
+  summarise(age_group_avg_real_price = mean(average_real_price, na.rm = TRUE), .groups = 'drop')
+
+# 연령대별 실제 결제 금액 평균 시각화
+ggplot(age_group_avg_price, aes(x = AGE_GROUP, y = age_group_avg_real_price)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "연령대별 실제 결제 금액 평균(회당)", x = "연령대", y = "평균 결제 금액") +
+  theme_minimal()
+```
